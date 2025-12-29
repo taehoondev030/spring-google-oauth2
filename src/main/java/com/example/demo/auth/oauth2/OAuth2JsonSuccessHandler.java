@@ -1,6 +1,9 @@
 package com.example.demo.auth.oauth2;
 
 import com.example.demo.auth.jwt.JwtUtil;
+import com.example.demo.auth.token.TokenHash;
+import com.example.demo.auth.token.domain.RefreshToken;
+import com.example.demo.auth.token.repository.RefreshTokenRepository;
 import com.example.demo.user.domain.AuthProvider;
 import com.example.demo.user.domain.User;
 import com.example.demo.user.repository.UserRepository;
@@ -10,6 +13,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.user.OAuth2User;
@@ -18,6 +22,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 
 @Component
 @RequiredArgsConstructor
@@ -25,7 +30,9 @@ public class OAuth2JsonSuccessHandler implements AuthenticationSuccessHandler {
 
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    @Value("${jwt.refresh-expire-ms}") private long refreshExpireMs;
 
     @Getter
     @AllArgsConstructor
@@ -69,6 +76,20 @@ public class OAuth2JsonSuccessHandler implements AuthenticationSuccessHandler {
 
         String accessToken = jwtUtil.createAccessToken(userId, role);
         String refreshToken = jwtUtil.createRefreshToken(userId, role);
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalStateException("User not found"));
+
+        String tokenHash = TokenHash.sha256(refreshToken);
+
+        RefreshToken entity = RefreshToken.builder()
+                .user(user)
+                .tokenHash(tokenHash)
+                .expiresAt(LocalDateTime.now().plusNanos(refreshExpireMs * 1_000_000))
+                .revoked(false)
+                .build();
+
+        refreshTokenRepository.save(entity);
 
         TokenResponse body = new TokenResponse(accessToken, refreshToken);
 
